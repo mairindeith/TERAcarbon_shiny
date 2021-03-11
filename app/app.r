@@ -86,11 +86,14 @@ ui <- fluidPage(
                 fileInput("uploadedCSV", "Choose a CSV file for upload (maximum 5MB)", multiple = FALSE, accept = c("test/csv", "text/comma-separated-values", "text/plain", ".csv"))
             ),
             fluidRow(
-                p("The first five rows of your uploaded data are shown below"),
+                p("The first five rows of your uploaded data are shown below."),
                 column(width=10,
                     tableOutput("uploaded")
                 ),
-                uiOutput("city_names")
+                actionButton("runMultipleTravellers"),
+                uiOutput("bad_destination"),
+                uiOutput("mult_destination"),
+                uiOutput("origin_check")
             ),
 #            hr(),
 #            textOutput("multi.cf"),
@@ -102,6 +105,7 @@ ui <- fluidPage(
 
 # Server ------------------------------------------------------------------
 server <- function(input, output){
+
     # Local copy/mod of distance lookup:
     distance.lookup.fmod= function(input.data){
         origin.vector= input.data$origin
@@ -121,13 +125,32 @@ server <- function(input, output){
                   and use the city name in the 'name' and 'country.etc' column in your input data.sheet"))
         cities$citycountry= paste0(cities$name,cities$country.etc)
         cities= cities[citycountry %in% datacitycountry]
+        # To-from matrix 
         city.matrix= CJ(name=cities$name, name1=cities$name,unique=TRUE)
-        tmp= merge(x=city.matrix, y=cities[,.(name,lat,long)], by.x = "name", by.y = "name", allow.cartesian=TRUE)
-        city.position= merge(x=tmp, y=cities[,.(name,lat,long)], by.x = "name1", by.y = "name", allow.cartesian=TRUE)
-        city.position= data.table(origin=city.position$name1, destination=city.position$name, long.origin=city.position$long.y,
-          lat.origin=city.position$lat.y, long.destination= city.position$long.x, lat.destination= city.position$lat.x)
+        tmp= merge(
+            x=city.matrix, 
+            y=cities[,.(name,lat,long)], 
+            by.x = "name", 
+            by.y = "name", 
+            allow.cartesian=TRUE)
+        city.position= merge(
+            x=tmp, 
+            y=cities[,.(name,lat,long)], 
+            by.x = "name1", 
+            by.y = "name", 
+            allow.cartesian=TRUE)
+        city.position= data.table(
+            origin=city.position$name1, 
+            destination=city.position$name, 
+            long.origin=city.position$long.y,
+            lat.origin=city.position$lat.y, 
+            long.destination= city.position$long.x, 
+            lat.destination= city.position$lat.x)
         city.position$distance= distGeo(city.position[,.(long.origin,lat.origin)],
                                         city.position[,.(long.destination,lat.destination)])/1000
+
+        ### This here is useful for later manipulation: 
+
         city.position= city.position[origin %in% unique(origin.vector) | destination %in% unique(destination.vector)]
         city.position$city.combo= paste0(city.position$origin,city.position$destination)
         distances=vector(length=length(origin.vector))
@@ -144,9 +167,10 @@ server <- function(input, output){
           destination.locations= destination.locations)
         localisation
     }
+
     # Local copy of the carbon footprint calculator:
-    carbon.footprint.fmod= function(input, Title.name="Carbon footprint", list.out=T){
-      localisation= distance.lookup.f(input)
+    carbon.footprint.fmod= function(input, localization, Title.name="Carbon footprint", list.out=T){
+      ## localisation= distance.lookup.f(input)
       localisation$origin.locations$capital=0
       localisation$destination.locations$capital=1
       cities= localisation$origin[!(name %in% localisation$destination.locations$name)]
@@ -273,7 +297,7 @@ server <- function(input, output){
         }
     )
     upload.df <<- reactiveValues()
-    # File upload
+    # File upload 
     output$uploaded <- renderTable({
         req(input$uploadedCSV)
         df <- read.csv(input$uploadedCSV$datapath,
@@ -283,10 +307,57 @@ server <- function(input, output){
         assign('upload.df', df, env=.GlobalEnv)
         cat(names(upload.df))
         cat(class(upload.df))
-        return(upload.df[1:3,])
+        return(upload.df[1:5,])
     })
 
+    bad_destinations <<- vector()
+    multiple_destination <<- vector()
+    shinyjs::disable("runMultipleTravellers")
+    observeEvent(upload.df(), {
+        if(!is.null(nrow(upload.df()))){
+            shinyjs::enable("runMultipleTravellers")
+            # First, ensure that the destinations are real cities
+            origin.vector <- upload.df()$origin
+            destination.vector <- upload.df()$destination
+            countries <- unique(upload.df()$origin.country)
+            datacitycountry <- paste0(upload.df()$origin, upload.df()$origin.country)
+            # lookup distances between locations
+            cities <- as.data.table(maps::world.cities)[country.etc %in% countries]
+            for(dest in destination.vector){
+                destination_present <- which(maps::world.cities == dest)
+                if(length(destination_present) == 0){
+                    bad_destination <- append(bad_destination, dest)
+                } else if(length(destination_present > 1)){
+                    multiple_destination <- append(multiple_destination, dest)
+                }
+            }
+            if(length(multiple_destination) > 0){
+                output$mult_destination <- renderUI({
+                    lapply(1:length(multiple_destination), function(val) {
+                        test <- data.frame(world.cities[which(maps::world.cities == multiple_destination[dest]),c("name", "country.etc"))
+                        test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
+                        choice_list <- list(rownames(test))
+                        names(choice_list) <- test$choices
+                        fluidRow(column(12,
+                            selectInput(paste0("dest_", val), paste0("The destination city ", mult_destination[val], " matches multiple cities. Please select the correct one:"), choices=choice_list)
+                        ))
+                    })
+                })
+                # upload.df()$destination[which(upload.df()$destination == dest)] <- 
+            }
+            if(length(bad_destination) > 0){
+                output$bad_destination <- renderUI({
+                    lapply(1:length(bad_destination), function(val) {
+                        fluidRow(column(12,textOutput(paste0("Destination ", bad_destination[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database. If this is the case, please choose a larger city that is close by."))))
+                    })
+                })
+            }
+            }
+        }
+    })
+    # 
     output$mappedOutput <- renderPlot({
+        
         # ...
         req(input$uploadedCSV)
         TESAcarbon::carbon.footprint.f(data.table(upload.df), "", list.out=F)
