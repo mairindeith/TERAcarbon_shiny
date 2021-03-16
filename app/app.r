@@ -89,15 +89,15 @@ ui <- fluidPage(
                 p("The first five rows of your uploaded data are shown below."),
                 column(width=10,
                     tableOutput("uploaded")
-                ),
-                actionButton("runMultipleTravellers"),
-                uiOutput("bad_destination"),
-                uiOutput("mult_destination"),
-                uiOutput("origin_check")
+                )
             ),
+            uiOutput("bad_destination"),
+            uiOutput("mult_destination"),
+            # uiOutput("origin_check"),
 #            hr(),
 #            textOutput("multi.cf"),
             hr(),
+            actionButton("runMultipleTravellers", "Calculate carbon footprint for multiple travellers", width="50%"),
             plotOutput(outputId = "mappedOutput")
         )
     )
@@ -109,7 +109,8 @@ server <- function(input, output){
     # Local copy/mod of distance lookup:
     distance.lookup.fmod= function(input.data){
         origin.vector= input.data$origin
-        destination.vector= input.data$destination
+        # Now, look up using a destination_row column, not the vector of unique values
+        destination_row.vector= input.data$destination_row
         countries= unique(input.data$origin.country)
         datacitycountry= paste0(input.data$origin, input.data$origin.country)
         # lookup distances between locations
@@ -148,9 +149,7 @@ server <- function(input, output){
             lat.destination= city.position$lat.x)
         city.position$distance= distGeo(city.position[,.(long.origin,lat.origin)],
                                         city.position[,.(long.destination,lat.destination)])/1000
-
         ### This here is useful for later manipulation: 
-
         city.position= city.position[origin %in% unique(origin.vector) | destination %in% unique(destination.vector)]
         city.position$city.combo= paste0(city.position$origin,city.position$destination)
         distances=vector(length=length(origin.vector))
@@ -159,7 +158,6 @@ server <- function(input, output){
                     city.position$destination==destination.vector[i],]$distance
         }
         distances= round(distances,0)*input.data$flying
-
         #lat and long of cities
         origin.locations= cities[ name %in% unique(origin.vector)]
         destination.locations= cities[ name %in% unique(destination.vector)]
@@ -167,8 +165,7 @@ server <- function(input, output){
           destination.locations= destination.locations)
         localisation
     }
-
-    # Local copy of the carbon footprint calculator:
+    # Local copy of the carbon footprint calculator, new version includes "localization" as an input
     carbon.footprint.fmod= function(input, localization, Title.name="Carbon footprint", list.out=T){
       ## localisation= distance.lookup.f(input)
       localisation$origin.locations$capital=0
@@ -196,7 +193,6 @@ server <- function(input, output){
       tab1$type= location$V2[match(tab1$Activity,location$activity.name)]
       tab= list(carbon= tab1, countries= unique(input$origin.country),locations= cities)
       tab
-
       mapbar= function(C.emissions){
         carbon= ggplot(tab$carbon,aes(y=Total,x=Activity))+
           geom_col(show.legend = F,size=.5) +
@@ -227,7 +223,7 @@ server <- function(input, output){
       }
       print(mapbar(tab))
       if (list.out) tab
-    } 
+    }
 
     # First panel: individual calculation
     observeEvent(input$calc, {
@@ -285,10 +281,12 @@ server <- function(input, output){
             " tonnes"))
         output$cf <- renderText(paste0("Total estimated carbon footprint: ", signif(calculated_cf, 3), " tonnes"))
     })
-    # Second, CSV reader and multi-person app
+
+    ## Second panel: 
+    ## CSV reader and multi-person app
 
     # Provide ICES data as a template
-    template_df <<- data.frame(TESAcarbon::ICES)# [1:20,]
+    template_df <<- data.frame(TESAcarbon::ICES)
     output$downloadTemplate <- downloadHandler(
         # Returns a string which indicates what name to use when saving the file
         filename = "TESACarbonCalculator_multiple_traveller_template.csv",
@@ -296,84 +294,137 @@ server <- function(input, output){
             write.table(template_df, file, sep = ",", row.names = FALSE)
         }
     )
-    upload.df <<- reactiveValues()
-    # File upload 
-    output$uploaded <- renderTable({
+    # Uploading data
+    upload.df <<- reactive({
         req(input$uploadedCSV)
         df <- read.csv(input$uploadedCSV$datapath,
             header=TRUE,
             sep=","
         )
-        assign('upload.df', df, env=.GlobalEnv)
-        cat(names(upload.df))
-        cat(class(upload.df))
-        return(upload.df[1:5,])
     })
+    # File upload 
+    output$uploaded <- renderTable({
+        req(input$uploadedCSV)
+        # assign('upload.df', df, env=.GlobalEnv)
+        # cat(names(upload.df))
+        # cat(class(upload.df))
+        return(head(upload.df()))
+    })
+#     cat(head(upload.df()))
 
-    bad_destinations <<- vector()
-    multiple_destination <<- vector()
+    # Now do some city checker work
     shinyjs::disable("runMultipleTravellers")
+    
     observeEvent(upload.df(), {
+        # If there is a file uploaded:
         if(!is.null(nrow(upload.df()))){
-            shinyjs::enable("runMultipleTravellers")
-            # First, ensure that the destinations are real cities
-            origin.vector <- upload.df()$origin
-            destination.vector <- upload.df()$destination
-            countries <- unique(upload.df()$origin.country)
-            datacitycountry <- paste0(upload.df()$origin, upload.df()$origin.country)
+            fixed_df <<- upload.df()
+            fixed_df$destination_row <- NaN
+            # Keep track of city multiples
+            multiple_destination <<- vector()
+            # Keep track of cities which aren't in the list
+            bad_destination <<- vector()
+            origin.vector <- fixed_df$origin
+            destination.vector <- unique(fixed_df$destination)
+            countries <- unique(fixed_df$origin.country)
+            datacitycountry <- paste0(fixed_df$origin, fixed_df$origin.country)
             # lookup distances between locations
             cities <- as.data.table(maps::world.cities)[country.etc %in% countries]
             for(dest in destination.vector){
                 destination_present <- which(maps::world.cities == dest)
+                print("Number of rows of destination_present:")
+                print(length(destination_present))
+                print(nrow(destination_present))
                 if(length(destination_present) == 0){
                     bad_destination <- append(bad_destination, dest)
-                } else if(length(destination_present > 1)){
+                    print(paste0("Bad: ", dest))
+                } else if(length(destination_present) > 1){
                     multiple_destination <- append(multiple_destination, dest)
+                    print(paste0("Mult: ", dest))
+                    print(paste0("Dest. present:", destination_present))
+                } else {
+                    print(paste0("Found: ", dest, ", row :", destination_present))
+                    print(paste0("Row lookup: ", fixed_df$destination[which(fixed_df$destination == dest)]))
+                    fixed_df$destination_row[which(fixed_df$destination == dest)] <- destination_present
                 }
             }
+            fixed_df <<- fixed_df
+            print(paste0("Bad vector: ", bad_destination))
+            print(length(bad_destination))
+            print(paste0("Multiple vector: ", paste(multiple_destination, collapse=",")))
+            # now, if any of those are duplicates, have the user input and fix
             if(length(multiple_destination) > 0){
+                print(paste0("...Length of multiple destination: ", length(multiple_destination)))
                 output$mult_destination <- renderUI({
                     lapply(1:length(multiple_destination), function(val) {
-                        test <- data.frame(world.cities[which(maps::world.cities == multiple_destination[dest]),c("name", "country.etc"))
+                        test <- data.frame(world.cities[which(maps::world.cities == multiple_destination[val]),c("name", "country.etc","lat","long")])
+                        print("TEST RESULTS:")
+                        print(test)
                         test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
-                        choice_list <- list(rownames(test))
+                        choice_list <- list(rownames(test))[[1]]
+                        print("Choice list:")
+                        print(choice_list)
+                        print("Test$choices")
+                        print(test$choices)
                         names(choice_list) <- test$choices
                         fluidRow(column(12,
-                            selectInput(paste0("dest_", val), paste0("The destination city ", mult_destination[val], " matches multiple cities. Please select the correct one:"), choices=choice_list)
+                            selectInput(inputId=paste0("dest_", val), label=paste0("The destination city ", multiple_destination[val], " matches multiple cities. Please select the correct one:"), choices=choice_list, selected="select below...")
                         ))
                     })
                 })
-                # upload.df()$destination[which(upload.df()$destination == dest)] <- 
             }
             if(length(bad_destination) > 0){
                 output$bad_destination <- renderUI({
                     lapply(1:length(bad_destination), function(val) {
-                        fluidRow(column(12,textOutput(paste0("Destination ", bad_destination[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database. If this is the case, please choose a larger city that is close by."))))
+                        h4(paste0("Destination ", bad_destination[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database. If this is the case, please choose a larger city that is close by."))
                     })
                 })
             }
+            # If the inputs are good, allow the button to be pressed
+            if(length(bad_destination == 0) & length(multiple_destination==0)){
+                shinyjs::enable("runMultipleTravellers")
             }
-        }
-    })
-    # 
-    output$mappedOutput <- renderPlot({
-        
-        # ...
-        req(input$uploadedCSV)
-        TESAcarbon::carbon.footprint.f(data.table(upload.df), "", list.out=F)
+            # }
+            # shinyjs::enable("runMultipleTravellers")
+            # First, ensure that the destinations are real cities
+        } # if(!is.null(nrow(upload.df()))){
+        # })
     })
 
-    observeEvent(input$uploadedCSV, {
-      origins <- unique(upload.df$origin)
-      for(o in 1:length(origins)){
-          #### This is probably important
-      }
-      for(d in 1:length())
-      output$city_problems <- renderUI({
-          lapply()
-        # h6("What if there are city name problems?")
-      })
+    ### Then run localization, etc. with the revised `fixed_df`
+    observeEvent(input$runMultipleTravellers, {
+        print("Fixed DF:")
+        print(fixed_df)
+        for(m in 1:length(multiple_destination)){
+            req(parse(text=paste0("input$dest_",m)))
+            new_dest <- eval(parse(text=paste0("input$dest_",m)))
+            print(paste0("New dest: ", new_dest))
+            orig_dest <- maps::world.cities[new_dest, "name"]
+            print(paste0("Orig dest: ", orig_dest))
+            print("Which rows?")
+            print(fixed_df$destination_row[which(fixed_df$destination == orig_dest)])
+            fixed_df$destination_row[which(fixed_df$destination == orig_dest)] <- new_dest
+        }
+        print("Fixed DF2:")
+        print(fixed_df)
+
     })
+
+
+
+
+
+
+
+    ### # 
+###     observeEvent(input$runMultipleTravellers, {
+###         output$mappedOutput <- renderPlot({
+###             req(input$uploadedCSV)
+###             # print(fixed_df)
+###             localizations <- distance.lookup.fmod(fixed_df)
+###             TESAcarbon::carbon.footprint.f(data.table(upload.df), "", list.out=F) # Error: replacement has length zero
+###         })
+###     })
 }
 
 shiny::shinyApp(ui = ui, server = server)
