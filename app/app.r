@@ -53,7 +53,7 @@ ui <- fluidPage(
                         hr(),
                         actionButton("calc", "Estimate carbon footprint", width="50%"),
                         tags$head(
-                            tags$style(HTML('#calc{background-color:DodgerBlue;
+                            tags$style(HTML('#calc{background-color:Gray;
                                 color: white}'))
                         )
                     )
@@ -91,14 +91,31 @@ ui <- fluidPage(
                     tableOutput("uploaded")
                 )
             ),
-            uiOutput("bad_destination"),
-            uiOutput("mult_destination"),
+            hr(),
+            fluidRow(
+                column(width=6, 
+                    uiOutput("bad_dest"),
+                    uiOutput("mult_dest")
+                ),
+                column(width=6,
+                    uiOutput("bad_orig"),
+                    uiOutput("mult_orig")
+                )
+            ),
             # uiOutput("origin_check"),
 #            hr(),
 #            textOutput("multi.cf"),
             hr(),
-            actionButton("runMultipleTravellers", "Calculate carbon footprint for multiple travellers", width="50%"),
-            plotOutput(outputId = "mappedOutput")
+            fluidRow(
+                column(8, align="center", 
+                actionButton("runMultipleTravellers", "Calculate carbon footprint for multiple travellers", width="50%"),
+                tags$head(
+                            tags$style(HTML('#calc{background-color:Gray;
+                                color: white}'))
+                        ),
+                plotOutput(outputId = "mappedOutput", width="75%")
+                )
+            )
         )
     )
 )
@@ -106,67 +123,68 @@ ui <- fluidPage(
 # Server ------------------------------------------------------------------
 server <- function(input, output){
 
-    # Local copy/mod of distance lookup:
-    distance.lookup.fmod= function(input.data){
-        origin.vector= input.data$origin
-        # Now, look up using a destination_row column, not the vector of unique values
-        destination_row.vector= input.data$destination_row
-        countries= unique(input.data$origin.country)
-        datacitycountry= paste0(input.data$origin, input.data$origin.country)
-        # lookup distances between locations
-        cities= as.data.table(world.cities)[country.etc %in% countries]
-          #error check cities
-          if(any(!(origin.vector %in% cities$name)))
-            stop(paste(origin.vector[!(origin.vector %in% cities$name)], ": this origin city country combination does not have an entry in the world cities database. Options:
-              (1) Names are generally English but not always, e.g. use Goteborg and not Gothenburg
-              (2) Do not use accents
-              (3) Centres with populations < 1000 are often not in the database. Try a close larger centre
-              (4) Try fuzzy matching your centre with the first three letters in quotation marks and in sentence case, e.g.
-                  world.cities[grep('Got', world.cities$name),]
-                  and use the city name in the 'name' and 'country.etc' column in your input data.sheet"))
-        cities$citycountry= paste0(cities$name,cities$country.etc)
-        cities= cities[citycountry %in% datacitycountry]
-        # To-from matrix 
-        city.matrix= CJ(name=cities$name, name1=cities$name,unique=TRUE)
-        tmp= merge(
-            x=city.matrix, 
-            y=cities[,.(name,lat,long)], 
-            by.x = "name", 
-            by.y = "name", 
-            allow.cartesian=TRUE)
-        city.position= merge(
-            x=tmp, 
-            y=cities[,.(name,lat,long)], 
-            by.x = "name1", 
-            by.y = "name", 
-            allow.cartesian=TRUE)
-        city.position= data.table(
-            origin=city.position$name1, 
-            destination=city.position$name, 
-            long.origin=city.position$long.y,
-            lat.origin=city.position$lat.y, 
-            long.destination= city.position$long.x, 
-            lat.destination= city.position$lat.x)
-        city.position$distance= distGeo(city.position[,.(long.origin,lat.origin)],
-                                        city.position[,.(long.destination,lat.destination)])/1000
-        ### This here is useful for later manipulation: 
-        city.position= city.position[origin %in% unique(origin.vector) | destination %in% unique(destination.vector)]
-        city.position$city.combo= paste0(city.position$origin,city.position$destination)
-        distances=vector(length=length(origin.vector))
-        for (i in 1:length(origin.vector)){
-          distances[i]= city.position[city.position$origin==origin.vector[i] &
-                    city.position$destination==destination.vector[i],]$distance
-        }
-        distances= round(distances,0)*input.data$flying
-        #lat and long of cities
-        origin.locations= cities[ name %in% unique(origin.vector)]
-        destination.locations= cities[ name %in% unique(destination.vector)]
-        localisation= list(distance= distances, origin.locations= origin.locations,
-          destination.locations= destination.locations)
-        localisation
-    }
+#    # Local copy/mod of distance lookup:
+#    distance.lookup.fmod= function(input.data){
+#        origin.vector= input.data$origin
+#        # Now, look up using a destination_row column, not the vector of unique values
+#        destination_row.vector= input.data$destination_row
+#        countries= unique(input.data$origin.country)
+#        datacitycountry= paste0(input.data$origin, input.data$origin.country)
+#        # lookup distances between locations
+#        cities= as.data.table(world.cities)[country.etc %in% countries]
+#          #error check cities
+#          if(any(!(origin.vector %in% cities$name)))
+#            stop(paste(origin.vector[!(origin.vector %in% cities$name)], ": this origin city country combination does not have an entry in the world cities database. Options:
+#              (1) Names are generally English but not always, e.g. use Goteborg and not Gothenburg
+#              (2) Do not use accents
+#              (3) Centres with populations < 1000 are often not in the database. Try a close larger centre
+#              (4) Try fuzzy matching your centre with the first three letters in quotation marks and in sentence case, e.g.
+#                  world.cities[grep('Got', world.cities$name),]
+#                  and use the city name in the 'name' and 'country.etc' column in your input data.sheet"))
+#        cities$citycountry= paste0(cities$name,cities$country.etc)
+#        cities= cities[citycountry %in% datacitycountry]
+#        # To-from matrix 
+#        city.matrix= CJ(name=cities$name, name1=cities$name,unique=TRUE)
+#        tmp= merge(
+#            x=city.matrix, 
+#            y=cities[,.(name,lat,long)], 
+#            by.x = "name", 
+#            by.y = "name", 
+#            allow.cartesian=TRUE)
+#        # Now add lat/longs 
+#        city.position= merge(
+#            x=tmp, 
+#            y=cities[,.(name,lat,long)], 
+#            by.x = "name1", 
+#            by.y = "name", 
+#            allow.cartesian=TRUE)
+#        city.position= data.table(
+#            origin=city.position$name1, 
+#            destination=city.position$name, 
+#            long.origin=city.position$long.y,
+#            lat.origin=city.position$lat.y, 
+#            long.destination= city.position$long.x, 
+#            lat.destination= city.position$lat.x)
+#        city.position$distance= distGeo(city.position[,.(long.origin,lat.origin)],
+#                                        city.position[,.(long.destination,lat.destination)])/1000
+#        ### This here is useful for later manipulation: 
+#        city.position= city.position[origin %in% unique(origin.vector) | destination %in% unique(destination.vector)]
+#        city.position$city.combo= paste0(city.position$origin,city.position$destination)
+#        distances=vector(length=length(origin.vector))
+#        for (i in 1:length(origin.vector)){
+#          distances[i]= city.position[city.position$origin==origin.vector[i] &
+#                    city.position$destination==destination.vector[i],]$distance
+#        }
+#        distances= round(distances,0)*input.data$flying
+#        #lat and long of cities
+#        origin.locations= cities[ name %in% unique(origin.vector)]
+#        destination.locations= cities[ name %in% unique(destination.vector)]
+#        localisation= list(distance= distances, origin.locations= origin.locations,
+#          destination.locations= destination.locations)
+#        localisation
+#    }
     # Local copy of the carbon footprint calculator, new version includes "localization" as an input
-    carbon.footprint.fmod= function(input, localization, Title.name="Carbon footprint", list.out=T){
+    carbon.footprint.fmod= function(input, localisation, Title.name="Carbon footprint", list.out=T){
       ## localisation= distance.lookup.f(input)
       localisation$origin.locations$capital=0
       localisation$destination.locations$capital=1
@@ -319,53 +337,70 @@ server <- function(input, output){
         # If there is a file uploaded:
         if(!is.null(nrow(upload.df()))){
             fixed_df <<- upload.df()
-            fixed_df$destination_row <- NaN
-            # Keep track of city multiples
-            multiple_destination <<- vector()
-            # Keep track of cities which aren't in the list
-            bad_destination <<- vector()
-            origin.vector <- fixed_df$origin
+            fixed_df$citycountry <- paste0(fixed_df$origin, fixed_df$origin.country)
+            origin.vector <- unique(fixed_df$citycountry)
             destination.vector <- unique(fixed_df$destination)
-            countries <- unique(fixed_df$origin.country)
-            datacitycountry <- paste0(fixed_df$origin, fixed_df$origin.country)
+            # Track multiples and missing cities
+            bad_origin <<- vector()
+            multiple_origin <<- vector()
+            # Track which rows in world.cities are representative
+            fixed_df$origin_row <- NaN
+            fixed_df$destination_row <- NaN
+
+            # Same for destination cities
+            multiple_destination <<- vector()
+            bad_destination <<- vector()
+            
             # lookup distances between locations
-            cities <- as.data.table(maps::world.cities)[country.etc %in% countries]
+            cities <- as.data.table(maps::world.cities)[country.etc %in% unique(fixed_df$origin.country)]
+            cities$citycountry <- paste0(cities$name,cities$country.etc)
+            for(cc in origin.vector){
+                origin_present <- which(cities$citycountry == cc)
+                if(length(origin_present) == 0){
+                    bad_origin <- append(bad_origin, cc)
+                } else if(length(origin_present) > 1){
+                    multiple_origin <- append(multiple_origin, cc)
+                } else {
+                    fixed_df$origin_row[which(fixed_df$citycountry == cc)] <- origin_present
+                }
+            }
             for(dest in destination.vector){
                 destination_present <- which(maps::world.cities == dest)
-                print("Number of rows of destination_present:")
-                print(length(destination_present))
-                print(nrow(destination_present))
                 if(length(destination_present) == 0){
                     bad_destination <- append(bad_destination, dest)
-                    print(paste0("Bad: ", dest))
+                    # print(paste0("Bad: ", dest))
                 } else if(length(destination_present) > 1){
                     multiple_destination <- append(multiple_destination, dest)
-                    print(paste0("Mult: ", dest))
-                    print(paste0("Dest. present:", destination_present))
+                    #print(paste0("Mult: ", dest))
+                    #print(paste0("Dest. present:", destination_present))
                 } else {
-                    print(paste0("Found: ", dest, ", row :", destination_present))
-                    print(paste0("Row lookup: ", fixed_df$destination[which(fixed_df$destination == dest)]))
+                    #print(paste0("Found: ", dest, ", row :", destination_present))
+                    #print(paste0("Row lookup: ", fixed_df$destination[which(fixed_df$destination == dest)]))
                     fixed_df$destination_row[which(fixed_df$destination == dest)] <- destination_present
                 }
             }
+            # re-establish global data frame
             fixed_df <<- fixed_df
-            print(paste0("Bad vector: ", bad_destination))
-            print(length(bad_destination))
-            print(paste0("Multiple vector: ", paste(multiple_destination, collapse=",")))
+            # print(paste0("Bad destination vector: ", bad_destination))
+            # print(length(bad_destination))
+            # print(paste0("Bad origin vector: ", bad_origin))
+            # print(length(bad_origin))
+            # print(paste0("Multiple destination vector: ", paste(multiple_destination, collapse=",")))
+            # print(paste0("Multiple origin vector: ", paste(multiple_origin, collapse=",")))
             # now, if any of those are duplicates, have the user input and fix
             if(length(multiple_destination) > 0){
                 print(paste0("...Length of multiple destination: ", length(multiple_destination)))
-                output$mult_destination <- renderUI({
+                output$mult_dest <- renderUI({
                     lapply(1:length(multiple_destination), function(val) {
                         test <- data.frame(world.cities[which(maps::world.cities == multiple_destination[val]),c("name", "country.etc","lat","long")])
-                        print("TEST RESULTS:")
-                        print(test)
+                        # print("DESTINATION TEST RESULTS:")
+                        # print(test)
                         test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
                         choice_list <- list(rownames(test))[[1]]
-                        print("Choice list:")
-                        print(choice_list)
-                        print("Test$choices")
-                        print(test$choices)
+                        # print("Choice list:")
+                        # print(choice_list)
+                        # print("Test$choices")
+                        # print(test$choices)
                         names(choice_list) <- test$choices
                         fluidRow(column(12,
                             selectInput(inputId=paste0("dest_", val), label=paste0("The destination city ", multiple_destination[val], " matches multiple cities. Please select the correct one:"), choices=choice_list, selected="select below...")
@@ -374,16 +409,46 @@ server <- function(input, output){
                 })
             }
             if(length(bad_destination) > 0){
-                output$bad_destination <- renderUI({
+                output$bad_dest <- renderUI({
                     lapply(1:length(bad_destination), function(val) {
-                        h4(paste0("Destination ", bad_destination[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database. If this is the case, please choose a larger city that is close by."))
+                        h4(paste0("Destination ", bad_destination[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database: please choose a larger city that is close by."))
                     })
                 })
             }
-            # If the inputs are good, allow the button to be pressed
-            if(length(bad_destination == 0) & length(multiple_destination==0)){
-                shinyjs::enable("runMultipleTravellers")
+            # Check for multiple origins, too
+            if(length(multiple_origin) > 0){
+                # print(paste0("...Length of multiple origin: ", length(multiple_origin)))
+                output$mult_orig <- renderUI({
+                    lapply(1:length(multiple_origin), function(val) {
+                        # world cities
+                        test <- data.frame(world.cities[which(paste0(maps::world.cities$name, maps::world.cities$country.etc) == multiple_origin[val]),c("name", "country.etc","lat","long")])
+                        # print("ORIGIN TEST RESULTS:")
+                        # print(test)
+                        test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
+                        choice_list <- list(rownames(test))[[1]]
+                        # print("Choice list:")
+                        # print(choice_list)
+                        # print("Test$choices")
+                        # print(test$choices)
+                        names(choice_list) <- test$choices
+                        fluidRow(column(12,
+                            selectInput(inputId=paste0("origin_", val), label=paste0("The origin city ", multiple_origin[val], " matches multiple cities. Please select the correct one:"), choices=choice_list, selected="select below...")
+                        ))
+                    })
+                })
             }
+            if(length(bad_origin) > 0){
+                output$bad_orig <- renderUI({
+                    lapply(1:length(bad_origin), function(val) {
+                        h4(paste0("Origin ", bad_origin[val], " matches no known cities. Please verify that you are using English spelling. If the city has less than 1000 people, it is unlikely to be in the database: please choose a larger city that is close by."))
+                    })
+                })
+            }
+
+            # If the inputs are good, allow the button to be pressed
+#            if(length(bad_destination == 0) & length(multiple_destination==0) & length(bad_origin)){
+#                shinyjs::enable("runMultipleTravellers")
+#            }
             # }
             # shinyjs::enable("runMultipleTravellers")
             # First, ensure that the destinations are real cities
@@ -393,38 +458,51 @@ server <- function(input, output){
 
     ### Then run localization, etc. with the revised `fixed_df`
     observeEvent(input$runMultipleTravellers, {
-        print("Fixed DF:")
-        print(fixed_df)
+        # print("Fixed DF:")
+        # print(fixed_df)
         for(m in 1:length(multiple_destination)){
             req(parse(text=paste0("input$dest_",m)))
             new_dest <- eval(parse(text=paste0("input$dest_",m)))
-            print(paste0("New dest: ", new_dest))
+            # print(paste0("New dest: ", new_dest))
             orig_dest <- maps::world.cities[new_dest, "name"]
-            print(paste0("Orig dest: ", orig_dest))
-            print("Which rows?")
-            print(fixed_df$destination_row[which(fixed_df$destination == orig_dest)])
+            # 
+            # print(paste0("Orig dest: ", orig_dest))
+            # print("Which rows?")
+            # print(fixed_df$destination_row[which(fixed_df$destination == orig_dest)])
             fixed_df$destination_row[which(fixed_df$destination == orig_dest)] <- new_dest
         }
-        print("Fixed DF2:")
-        print(fixed_df)
-
+        for(m in 1:length(multiple_origin)){
+                        req(parse(text=paste0("input$origin_",m)))
+            new_origin <- eval(parse(text=paste0("input$origin_",m)))
+            # print(paste0("New origin: ", new_origin))
+            orig_origin <- maps::world.cities[new_origin, "name"]
+            # 
+            # print(paste0("Orig dest: ", orig_origin))
+            # print("Which rows?")
+            # print(fixed_df$origin_row[which(fixed_df$origin == orig_origin)])
+            fixed_df$origin_row[which(fixed_df$origin == orig_origin)] <- new_origin
+        }
+        # print("Fixed DF2:")
+        # print(fixed_df)
+        ### Origin locations
+        fixed_df$lat.origin <- maps::world.cities[fixed_df$origin_row,]$lat
+        fixed_df$long.origin <- maps::world.cities[fixed_df$origin_row,]$long
+        fixed_df$lat.dest <- maps::world.cities[fixed_df$destination_row,]$lat
+        fixed_df$long.dest <- maps::world.cities[fixed_df$destination_row,]$long
+        # dest_locations <- maps::world.cities[unique(fixed_df$destination_row),]
+        fixed_df$distances <- round(distGeo(fixed_df[,c("long.origin","lat.origin")],
+                                      fixed_df[,c("long.dest", "lat.dest")]
+        )/1000, 0)*fixed_df$flying
+        # print(fixed_df$distances)
+        # Run carbon footprint
+        origin.locations <- as.data.table(maps::world.cities[unique(fixed_df$origin_row),])
+        origin.locations$citycountry <- paste0(origin.locations$name, origin.locations$country.etc)
+        destination.locations <- as.data.table(maps::world.cities[unique(fixed_df$destination_row),])
+        destination.locations$citycountry <- paste0(destination.locations$name, destination.locations$country.etc)
+        localisation <<- list(distance=fixed_df$distances, origin.locations=origin.locations,
+          destination.locations=destination.locations)
+        output$mappedOutput <- renderPlot(carbon.footprint.fmod(as.data.table(fixed_df), localisation))
     })
-
-
-
-
-
-
-
-    ### # 
-###     observeEvent(input$runMultipleTravellers, {
-###         output$mappedOutput <- renderPlot({
-###             req(input$uploadedCSV)
-###             # print(fixed_df)
-###             localizations <- distance.lookup.fmod(fixed_df)
-###             TESAcarbon::carbon.footprint.f(data.table(upload.df), "", list.out=F) # Error: replacement has length zero
-###         })
-###     })
 }
 
 shiny::shinyApp(ui = ui, server = server)
