@@ -115,73 +115,60 @@ ui <- fluidPage(
                 plotOutput(outputId = "mappedOutput", width="75%")
                 )
             )
+        ),
+        tabPanel(
+            "Modify carbon emission parameters",
+            helpText("Carbon emissions (tonnes CO2) per km flying, driving, train or bus and emissions for a night in a hotel or average meal in a restaurant are taken from https://calculator.carbonfootprint.com/. You can modify these estimates for custom calculations."),
+            hr(),
+            h4("Transit (plane, car, and public transit)"),
+            fluidRow(column(4, 
+                h5("Plane travel"),
+                numericInput("param_plane1", "CO2 emitted PER KM of plane travel", value=TESAcarbon::carbon.params$C.plane[1], min=0),
+                numericInput("param_plane2", "Fixed CO2 emitted by plane travel (i.e. in addition to per-km emissions)", value=TESAcarbon::carbon.params$C.plane[2], min=0)
+            ),
+            column(4, 
+                h5("Car travel"),
+                numericInput("param_car1", "CO2 emitted per km of car travel", value=TESAcarbon::carbon.params$C.car[1], min=0),
+                numericInput("param_car2", "Fixed CO2 emitted by car travel (i.e. in addition to per-km emissions)", value=TESAcarbon::carbon.params$C.car[2], min=0)
+            ), 
+            column(4,
+                h5("Public transit"),
+                numericInput("param_bustrain1", "CO2 emitted per km of bus/train travel", value=TESAcarbon::carbon.params$C.bustrain[1], min=0),
+                numericInput("param_bustrain2", "Fixed CO2 emitted by bus/train travel", value=TESAcarbon::carbon.params$C.bustrain[2], min=0)
+            )),
+            hr(),
+            h4("Room and board"),
+            fluidRow(column(4, 
+                h5("Hotel stay CO2"),
+                numericInput("param_hotel1", "CO2 emitted PER NIGHT stayed in a hotel", value=TESAcarbon::carbon.params$C.hotel[1], min=0),
+                numericInput("param_hotel2", "Fixed CO2 emissions for staying in a hotel (i.e. in addition to per-night CO2 emissions)", value=TESAcarbon::carbon.params$C.hotel[2], min=0)
+            ), 
+            column(4, 
+                h5("Eating out CO2"),
+                numericInput("param_meal1", "CO2 emitted PER MEAL", value=TESAcarbon::carbon.params$C.meal[1], min=0),
+                numericInput("param_meal2", "Fixed CO2 emissions for eating out (i.e. in addition to per-meal emissions)", value=TESAcarbon::carbon.params$C.meal[2], min=0),
+                numericInput("param_mealdiscount", "CO2 meal discounting (i.e. what proportion of CO2 from eating out would you have emitted anyway by eating at home?)", value=TESAcarbon::carbon.params$C.meal.discount, min=0, max=1)
+            ))
+            # actionButton("saveParams", "Save and use custom parameters")
         )
     )
 )
 
 # Server ------------------------------------------------------------------
 server <- function(input, output){
+    # To account for non-default parameters, copy the functions here:
+    C.f= function(hotel.nights, plane.distance, bustrain.distance, car.distance, number.car.sharing, meals){
+      number.car.sharing[number.car.sharing==0]=1
+      c.hotel= carbon.params.mod()$C.hotel[1] * hotel.nights + carbon.params.mod()$C.hotel[2]
+      c.plane= carbon.params.mod()$C.plane[1] * plane.distance + carbon.params.mod()$C.plane[2]
+      c.bustrain= carbon.params.mod()$C.bustrain[1] * bustrain.distance + carbon.params.mod()$C.bustrain[2]
+      c.car= (carbon.params.mod()$C.car[1] * car.distance + carbon.params.mod()$C.car[2]) / number.car.sharing
+      c.meal= (carbon.params.mod()$C.meal[1] * meals + carbon.params.mod()$C.meal[2]) * carbon.params.mod()$C.meal.discount
+      C.total= c.plane + c.car + c.hotel + c.meal
+      C.total
+    }
 
-#    # Local copy/mod of distance lookup:
-#    distance.lookup.fmod= function(input.data){
-#        origin.vector= input.data$origin
-#        # Now, look up using a destination_row column, not the vector of unique values
-#        destination_row.vector= input.data$destination_row
-#        countries= unique(input.data$origin.country)
-#        datacitycountry= paste0(input.data$origin, input.data$origin.country)
-#        # lookup distances between locations
-#        cities= as.data.table(world.cities)[country.etc %in% countries]
-#          #error check cities
-#          if(any(!(origin.vector %in% cities$name)))
-#            stop(paste(origin.vector[!(origin.vector %in% cities$name)], ": this origin city country combination does not have an entry in the world cities database. Options:
-#              (1) Names are generally English but not always, e.g. use Goteborg and not Gothenburg
-#              (2) Do not use accents
-#              (3) Centres with populations < 1000 are often not in the database. Try a close larger centre
-#              (4) Try fuzzy matching your centre with the first three letters in quotation marks and in sentence case, e.g.
-#                  world.cities[grep('Got', world.cities$name),]
-#                  and use the city name in the 'name' and 'country.etc' column in your input data.sheet"))
-#        cities$citycountry= paste0(cities$name,cities$country.etc)
-#        cities= cities[citycountry %in% datacitycountry]
-#        # To-from matrix 
-#        city.matrix= CJ(name=cities$name, name1=cities$name,unique=TRUE)
-#        tmp= merge(
-#            x=city.matrix, 
-#            y=cities[,.(name,lat,long)], 
-#            by.x = "name", 
-#            by.y = "name", 
-#            allow.cartesian=TRUE)
-#        # Now add lat/longs 
-#        city.position= merge(
-#            x=tmp, 
-#            y=cities[,.(name,lat,long)], 
-#            by.x = "name1", 
-#            by.y = "name", 
-#            allow.cartesian=TRUE)
-#        city.position= data.table(
-#            origin=city.position$name1, 
-#            destination=city.position$name, 
-#            long.origin=city.position$long.y,
-#            lat.origin=city.position$lat.y, 
-#            long.destination= city.position$long.x, 
-#            lat.destination= city.position$lat.x)
-#        city.position$distance= distGeo(city.position[,.(long.origin,lat.origin)],
-#                                        city.position[,.(long.destination,lat.destination)])/1000
-#        ### This here is useful for later manipulation: 
-#        city.position= city.position[origin %in% unique(origin.vector) | destination %in% unique(destination.vector)]
-#        city.position$city.combo= paste0(city.position$origin,city.position$destination)
-#        distances=vector(length=length(origin.vector))
-#        for (i in 1:length(origin.vector)){
-#          distances[i]= city.position[city.position$origin==origin.vector[i] &
-#                    city.position$destination==destination.vector[i],]$distance
-#        }
-#        distances= round(distances,0)*input.data$flying
-#        #lat and long of cities
-#        origin.locations= cities[ name %in% unique(origin.vector)]
-#        destination.locations= cities[ name %in% unique(destination.vector)]
-#        localisation= list(distance= distances, origin.locations= origin.locations,
-#          destination.locations= destination.locations)
-#        localisation
-#    }
+
     # Local copy of the carbon footprint calculator, new version includes "localization" as an input
     carbon.footprint.fmod= function(input, localisation, Title.name="Carbon footprint", list.out=T){
       ## localisation= distance.lookup.f(input)
@@ -242,6 +229,19 @@ server <- function(input, output){
       if (list.out) tab
     }
 
+    # observeEvent(input$saveParams, {
+    carbon.params.mod <<- reactive({
+        list(
+            "C.plane" = c(input$param_plane1, input$param_plane2),
+            "C.car" = c(input$param_car1, input$param_car2),
+            "C.bustrain" = c(input$param_bustrain1, input$param_bustrain2),
+            "C.hotel" = c(input$param_hotel1, input$param_hotel2),
+            "C.meal" = c(input$param_meal1, input$param_meal2),
+            "C.meal.discount" = input$param_mealdiscount
+        )
+    })
+    # })
+
     # First panel: individual calculation
     observeEvent(input$calc, {
         # Do some simple replacements to remove "km" and "kilometers" instances
@@ -273,7 +273,7 @@ server <- function(input, output){
         # print(paste0("Hotel: ", hotel.nights))
         # print(paste0("Meals: ", meals))
 
-        calculated_cf <- TESAcarbon::C.f(
+        calculated_cf <- C.f(
             hotel.nights=ifelse(is.na(hotel.nights), 0, hotel.nights),
             plane.distance=ifelse(is.na(plane.distance), 0, plane.distance),
             bustrain.distance=ifelse(is.na(bustrain.distance), 0, bustrain.distance),
@@ -282,19 +282,19 @@ server <- function(input, output){
             meals=ifelse(is.na(meals), 0, meals)
         )
         output$cf.hotel <- renderText(paste0("Carbon footprint for hotel: ", 
-            signif(TESAcarbon::carbon.params$C.hotel[1] * hotel.nights + TESAcarbon::carbon.params$C.hotel[2], 3),
+            signif(carbon.params.mod()$C.hotel[1] * hotel.nights + carbon.params.mod()$C.hotel[2], 3),
             " tonnes"))
         output$cf.plane <- renderText(paste0("Carbon footprint for airplane travel: ", 
-            signif(TESAcarbon::carbon.params$C.plane[1] * plane.distance + TESAcarbon::carbon.params$C.plane[2], 3),
+            signif(carbon.params.mod()$C.plane[1] * plane.distance + carbon.params.mod()$C.plane[2], 3),
             " tonnes"))
         output$cf.bustrain <- renderText(paste0("Carbon footprint for bus and train travel: ", 
-            signif(TESAcarbon::carbon.params$C.bustrain[1] * bustrain.distance + TESAcarbon::carbon.params$C.bustrain[2], 3),
+            signif(carbon.params.mod()$C.bustrain[1] * bustrain.distance + carbon.params.mod()$C.bustrain[2], 3),
             " tonnes"))
         output$cf.car <- renderText(paste0("Carbon footprint for car travel (per passenger): ", 
-            signif((TESAcarbon::carbon.params$C.car[1] * car.distance + TESAcarbon::carbon.params$C.car[2]) / input$number.car.sharing, 3),
+            signif((carbon.params.mod()$C.car[1] * car.distance + carbon.params.mod()$C.car[2]) / input$number.car.sharing, 3),
             " tonnes"))
         output$cf.meal <- renderText(paste0("Carbon footprint for meals: ", 
-            signif((TESAcarbon::carbon.params$C.meal[1] * meals + TESAcarbon::carbon.params$C.meal[2]) * TESAcarbon::carbon.params$C.meal.discount, 3), 
+            signif((carbon.params.mod()$C.meal[1] * meals + carbon.params.mod()$C.meal[2]) * carbon.params.mod()$C.meal.discount, 3), 
             " tonnes"))
         output$cf <- renderText(paste0("Total estimated carbon footprint: ", signif(calculated_cf, 3), " tonnes"))
     })
