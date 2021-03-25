@@ -1,6 +1,5 @@
 # Load libraries ----------------------------------------------------------
 library(shiny)
-library(shinyjs)
 library(TESAcarbon)
 library(maps)
 
@@ -323,16 +322,9 @@ server <- function(input, output){
     # File upload 
     output$uploaded <- renderTable({
         req(input$uploadedCSV)
-        # assign('upload.df', df, env=.GlobalEnv)
-        # cat(names(upload.df))
-        # cat(class(upload.df))
         return(head(upload.df()))
     })
-#     cat(head(upload.df()))
 
-    # Now do some city checker work
-    shinyjs::disable("runMultipleTravellers")
-    
     observeEvent(upload.df(), {
         # If there is a file uploaded:
         if(!is.null(nrow(upload.df()))){
@@ -368,39 +360,22 @@ server <- function(input, output){
                 destination_present <- which(maps::world.cities == dest)
                 if(length(destination_present) == 0){
                     bad_destination <- append(bad_destination, dest)
-                    # print(paste0("Bad: ", dest))
                 } else if(length(destination_present) > 1){
                     multiple_destination <- append(multiple_destination, dest)
-                    #print(paste0("Mult: ", dest))
-                    #print(paste0("Dest. present:", destination_present))
                 } else {
-                    #print(paste0("Found: ", dest, ", row :", destination_present))
-                    #print(paste0("Row lookup: ", fixed_df$destination[which(fixed_df$destination == dest)]))
                     fixed_df$destination_row[which(fixed_df$destination == dest)] <- destination_present
                 }
             }
             # re-establish global data frame
             fixed_df <<- fixed_df
-            # print(paste0("Bad destination vector: ", bad_destination))
-            # print(length(bad_destination))
-            # print(paste0("Bad origin vector: ", bad_origin))
-            # print(length(bad_origin))
-            # print(paste0("Multiple destination vector: ", paste(multiple_destination, collapse=",")))
-            # print(paste0("Multiple origin vector: ", paste(multiple_origin, collapse=",")))
             # now, if any of those are duplicates, have the user input and fix
             if(length(multiple_destination) > 0){
                 print(paste0("...Length of multiple destination: ", length(multiple_destination)))
                 output$mult_dest <- renderUI({
                     lapply(1:length(multiple_destination), function(val) {
                         test <- data.frame(world.cities[which(maps::world.cities == multiple_destination[val]),c("name", "country.etc","lat","long")])
-                        # print("DESTINATION TEST RESULTS:")
-                        # print(test)
-                        test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
+                        test$choices <- paste0(test$name, ", ", test$country.etc, " (lat: ",test$lat, ", lon:", test$long, ")")
                         choice_list <- list(rownames(test))[[1]]
-                        # print("Choice list:")
-                        # print(choice_list)
-                        # print("Test$choices")
-                        # print(test$choices)
                         names(choice_list) <- test$choices
                         fluidRow(column(12,
                             selectInput(inputId=paste0("dest_", val), label=paste0("The destination city ", multiple_destination[val], " matches multiple cities. Please select the correct one:"), choices=choice_list, selected="select below...")
@@ -417,19 +392,11 @@ server <- function(input, output){
             }
             # Check for multiple origins, too
             if(length(multiple_origin) > 0){
-                # print(paste0("...Length of multiple origin: ", length(multiple_origin)))
                 output$mult_orig <- renderUI({
                     lapply(1:length(multiple_origin), function(val) {
-                        # world cities
                         test <- data.frame(world.cities[which(paste0(maps::world.cities$name, maps::world.cities$country.etc) == multiple_origin[val]),c("name", "country.etc","lat","long")])
-                        # print("ORIGIN TEST RESULTS:")
-                        # print(test)
-                        test$choices <- paste0(test$name, ", ", test$country.etc, " (",test$lat, ", ", test$long, ")")
+                        test$choices <- paste0(test$name, ", ", test$country.etc, " (lat: ",test$lat, ", lon:", test$long, ")")
                         choice_list <- list(rownames(test))[[1]]
-                        # print("Choice list:")
-                        # print(choice_list)
-                        # print("Test$choices")
-                        # print(test$choices)
                         names(choice_list) <- test$choices
                         fluidRow(column(12,
                             selectInput(inputId=paste0("origin_", val), label=paste0("The origin city ", multiple_origin[val], " matches multiple cities. Please select the correct one:"), choices=choice_list, selected="select below...")
@@ -444,16 +411,7 @@ server <- function(input, output){
                     })
                 })
             }
-
-            # If the inputs are good, allow the button to be pressed
-#            if(length(bad_destination == 0) & length(multiple_destination==0) & length(bad_origin)){
-#                shinyjs::enable("runMultipleTravellers")
-#            }
-            # }
-            # shinyjs::enable("runMultipleTravellers")
-            # First, ensure that the destinations are real cities
-        } # if(!is.null(nrow(upload.df()))){
-        # })
+        }
     })
 
     ### Then run localization, etc. with the revised `fixed_df`
